@@ -1,0 +1,507 @@
+#!/bin/bash
+
+cd $(dirname "$0") || exit
+base_dir=$(pwd)
+
+program_name=$(basename "$0")
+config_dir=${base_dir}/.config
+manifest_dir=${base_dir}/manifests
+elasticsearch_file=${config_dir}/elasticsearch.yaml
+fess_file=${config_dir}/fess.yaml
+eckctl_config_file=${config_dir}/eckctl_config
+eck_name=fess
+k8s_type=kind
+eck_url=https://download.elastic.co/downloads/eck/1.5.0/all-in-one.yaml
+wait_time=600
+default_pool_size=1
+es_version=7.12.1
+fess_version=snapshot
+es_master_pool_size=3
+es_data_pool_size=2
+es_client_pool_size=1
+fess_pool_size=1
+
+usage() {
+  echo "Usage: ${program_name} [COMMAND] ..."
+  echo
+  echo "Commands:"
+  echo ""
+  exit 1
+}
+
+check_command() {
+  cmd=$1
+  command -v ${cmd} > /dev/null 2>&1
+  if [[ $? != 0 ]] ; then
+    echo "${cmd} does not exist. Please install ${cmd} command."
+    exit 1
+  fi
+}
+
+setup_config() {
+  if [[ -f ${eckctl_config_file} ]] ; then
+    . "${eckctl_config_file}"
+  fi
+}
+
+create_eck() {
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      -k | --k8s)
+        k8s_type=$2
+        shift 2
+        ;;
+      -dn | --default-node)
+        default_pool_size=$2
+        shift 2
+        ;;
+      -emn | --es-master-node)
+        es_master_pool_size=$2
+        shift 2
+        ;;
+      -edn | --es-data-node)
+        es_data_pool_size=$2
+        shift 2
+        ;;
+      -ecn | --es-client-node)
+        es_client_pool_size=$2
+        shift 2
+        ;;
+      -fn | --fess-node)
+        fess_pool_size=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  check_command kubectl
+
+  echo "<<<Elastic Cloud>>>"
+  echo " Default: ${default_pool_size} nodes"
+  echo "<<<Elasticsearch>>>"
+  echo " Master: ${es_master_pool_size} nodes"
+  echo " Data:   ${es_data_pool_size} nodes"
+  echo " Client: ${es_client_pool_size} nodes"
+  echo
+
+  if [[ ${k8s_type} = "kind" ]] ; then
+    create_k8s_for_kind -n "${eck_name}" \
+      --default-node "${default_pool_size}" \
+      --es-master-node "${es_master_pool_size}" \
+      --es-data-node "${es_data_pool_size}" \
+      --es-client-node "${es_client_pool_size}" \
+      --fess-node "${fess_pool_size}"
+  elif [[ ${k8s_type} = "eks" ]] ; then
+    create_k8s_for_eks -n "${eck_name}" \
+      --default-node "${default_pool_size}" \
+      --es-master-node "${es_master_pool_size}" \
+      --es-data-node "${es_data_pool_size}" \
+      --es-client-node "${es_client_pool_size}" \
+      --fess-node "${fess_pool_size}"
+  else
+    echo "Unknown kubernetes: ${k8s_type}"
+    exit 1
+  fi
+
+  echo "export eck_name=${eck_name}" > ${eckctl_config_file}
+
+  echo "Applying Elastic Cloud on Kubernetes..."
+  kubectl apply -f ${eck_url}
+
+  count=0
+  ret=1
+  while [[ ${count} -lt ${wait_time} ]] && [[ $ret != 0 ]] ; do
+    echo -n "."
+    count=$(expr $count + 1)
+    sleep 1
+    kubectl -n elastic-system logs statefulset.apps/elastic-operator > /dev/null 2>&1
+    ret=$?
+  done
+  echo
+  if [[ $ret != 0 ]] ; then
+    echo "ECK installation failed."
+    exit 1
+  fi
+
+  echo "Applying Elasticsearch..."
+  kubectl apply -f ${elasticsearch_file}
+  
+  count=0
+  ret=1
+  while [[ ${count} -lt ${wait_time} ]] && [[ $ret != 0 ]] ; do
+    echo -n "."
+    count=$(expr $count + 1)
+    sleep 1
+    kubectl get elasticsearch | grep -w ^${eck_name} | grep -w green > /dev/null 2>&1
+    ret=$?
+  done
+  echo
+  if [[ $ret != 0 ]] ; then
+    echo "Elasticsearch installation failed."
+    exit 1
+  fi
+
+  sed -e "s/__CLUSTER_NAME__/${eck_name}/g" \
+      -e "s/__FESS_VERSION__/${fess_version}/g" \
+      -e "s/__FESS_COUNT__/${fess_pool_size}/g" \
+      ${manifest_dir}/${k8s_type}-fess.yaml > ${fess_file}
+  echo "Applying Fess..."
+  kubectl apply -f ${fess_file}
+}
+
+create_k8s_for_kind() {
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      -dn | --default-node)
+        default_pool_size=$2
+        shift 2
+        ;;
+      -emn | --es-master-node)
+        es_master_pool_size=$2
+        shift 2
+        ;;
+      -edn | --es-data-node)
+        es_data_pool_size=$2
+        shift 2
+        ;;
+      -ecn | --es-client-node)
+        es_client_pool_size=$2
+        shift 2
+        ;;
+      -fn | --fess-node)
+        fess_pool_size=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  check_command kind
+
+  config_file=${config_dir}/kind-cluster.yaml
+  cp ${manifest_dir}/kind-cluster.yaml ${config_file}
+  node_size=0
+  node_size=$(expr ${node_size} + ${default_pool_size})
+  node_size=$(expr ${node_size} + ${es_master_pool_size})
+  node_size=$(expr ${node_size} + ${es_data_pool_size})
+  node_size=$(expr ${node_size} + ${es_client_pool_size})
+  node_size=$(expr ${node_size} + ${fess_pool_size})
+  for i in $(seq 1 $node_size) ; do
+    echo "- role: worker" >> ${config_file}
+  done
+  kind create cluster --name ${eck_name} --config ${config_file}
+  if [[ $? != 0 ]] ; then
+    echo "${program_name} cannot create ${eck_name} cluster on kind."
+    exit 1
+  fi
+
+  sed -e "s/__CLUSTER_NAME__/${eck_name}/g" \
+      -e "s/__ES_VERSION__/${es_version}/g" \
+      -e "s/__ES_MASTER_COUNT__/${es_master_pool_size}/g" \
+      -e "s/__ES_DATA_COUNT__/${es_data_pool_size}/g" \
+      -e "s/__ES_CLIENT_COUNT__/${es_client_pool_size}/g" \
+      ${manifest_dir}/kind-elasticsearch.yaml > ${elasticsearch_file}
+
+  node_num=0
+  for i in $(seq 1 $es_master_pool_size) ; do
+    node_num=$(expr $node_num + 1)
+    node_name=${eck_name}-worker
+    if [[ $node_num -gt 1 ]] ; then
+      node_name=$node_name$node_num
+    fi
+    count=0
+    ret=1
+    while [[ ${count} -lt ${wait_time} ]] && [[ ${ret} != 0 ]] ; do
+      echo -n "."
+      count=$(expr $count + 1)
+      sleep 1
+      kubectl get nodes | grep -w ^${node_name} | grep -w Ready > /dev/null 2>&1
+      ret=$?
+    done
+    kubectl taint nodes ${node_name} dedicated=es-master:NoSchedule > /dev/null 2>&1
+  done
+  for i in $(seq 1 $es_data_pool_size) ; do
+    node_num=$(expr $node_num + 1)
+    node_name=${eck_name}-worker
+    if [[ $node_num -gt 1 ]] ; then
+      node_name=$node_name$node_num
+    fi
+    count=0
+    ret=1
+    while [[ ${count} -lt ${wait_time} ]] && [[ ${ret} != 0 ]] ; do
+      echo -n "."
+      count=$(expr $count + 1)
+      sleep 1
+      kubectl get nodes | grep -w ^${node_name} | grep -w Ready > /dev/null 2>&1
+      ret=$?
+    done
+    kubectl taint nodes ${node_name} dedicated=es-data:NoSchedule > /dev/null 2>&1
+  done
+  for i in $(seq 1 $es_client_pool_size) ; do
+    node_num=$(expr $node_num + 1)
+    node_name=${eck_name}-worker
+    if [[ $node_num -gt 1 ]] ; then
+      node_name=$node_name$node_num
+    fi
+    count=0
+    ret=1
+    while [[ ${count} -lt ${wait_time} ]] && [[ ${ret} != 0 ]] ; do
+      echo -n "."
+      count=$(expr $count + 1)
+      sleep 1
+      kubectl get nodes | grep -w ^${node_name} | grep -w Ready > /dev/null 2>&1
+      ret=$?
+    done
+    kubectl taint nodes ${node_name} dedicated=es-client:NoSchedule > /dev/null 2>&1
+  done
+  for i in $(seq 1 $fess_pool_size) ; do
+    node_num=$(expr $node_num + 1)
+    node_name=${eck_name}-worker
+    if [[ $node_num -gt 1 ]] ; then
+      node_name=$node_name$node_num
+    fi
+    count=0
+    ret=1
+    while [[ ${count} -lt ${wait_time} ]] && [[ ${ret} != 0 ]] ; do
+      echo -n "."
+      count=$(expr $count + 1)
+      sleep 1
+      kubectl get nodes | grep -w ^${node_name} | grep -w Ready > /dev/null 2>&1
+      ret=$?
+    done
+    kubectl taint nodes ${node_name} dedicated=fess:NoSchedule > /dev/null 2>&1
+  done
+  echo
+}
+
+create_k8s_for_eks() {
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      -dn | --default-node)
+        default_pool_size=$2
+        shift 2
+        ;;
+      -emn | --es-master-node)
+        es_master_pool_size=$2
+        shift 2
+        ;;
+      -edn | --es-data-node)
+        es_data_pool_size=$2
+        shift 2
+        ;;
+      -ecn | --es-client-node)
+        es_client_pool_size=$2
+        shift 2
+        ;;
+      -fn | --fess-node)
+        fess_pool_size=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  check_command eksctl
+
+  config_file=${config_dir}/eks-cluster.yaml
+  sed -e "s/__CLUSTER_NAME__/${eck_name}/g" \
+      -e "s/__DEFAULT_COUNT__/${default_pool_size}/g" \
+      -e "s/__ES_MASTER_COUNT__/${es_master_pool_size}/g" \
+      -e "s/__ES_DATA_COUNT__/${es_data_pool_size}/g" \
+      -e "s/__ES_CLIENT_COUNT__/${es_client_pool_size}/g" \
+      -e "s/__FESS_COUNT__/${fess_pool_size}/g" \
+      ${manifest_dir}/eks-cluster.yaml > ${config_file}
+  eksctl create cluster -f ${config_file}
+  if [[ $? != 0 ]] ; then
+    echo "${program_name} cannot create ${eck_name} cluster on eks."
+    exit 1
+  fi
+
+  sed -e "s/__CLUSTER_NAME__/${eck_name}/g" \
+      -e "s/__ES_VERSION__/${es_version}/g" \
+      -e "s/__ES_MASTER_COUNT__/${es_master_pool_size}/g" \
+      -e "s/__ES_DATA_COUNT__/${es_data_pool_size}/g" \
+      -e "s/__ES_CLIENT_COUNT__/${es_client_pool_size}/g" \
+      ${manifest_dir}/eks-elasticsearch.yaml > ${elasticsearch_file}
+}
+
+delete_eck() {
+  setup_config
+
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      -k | --k8s)
+        k8s_type=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ ${k8s_type} = "kind" ]] ; then
+    delete_k8s_for_kind -n "${eck_name}"
+  elif [[ ${k8s_type} = "eks" ]] ; then
+    delete_k8s_for_eks -n "${eck_name}"
+  else
+    echo "Unknown kubernetes: ${k8s_type}"
+    exit 1
+  fi
+
+}
+
+delete_k8s_for_kind() {
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  check_command kind
+
+  kind delete cluster --name ${eck_name}
+  if [[ $? != 0 ]] ; then
+    echo "${program_name} cannot delete ${eck_name} cluster on kind."
+    exit 1
+  fi
+
+  rm -f ${config_dir}/kind-cluster.yaml ${elasticsearch_file} ${eckctl_config_file} ${fess_file}
+}
+
+delete_k8s_for_eks() {
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  check_command eksctl
+
+  eksctl delete cluster -f ${config_dir}/eks-cluster.yaml
+  if [[ $? != 0 ]] ; then
+    echo "${program_name} cannot delete ${eck_name} cluster on kind."
+    exit 1
+  fi
+
+  rm -f ${config_dir}/eks-cluster.yaml ${elasticsearch_file} ${eckctl_config_file} ${fess_file}
+}
+
+run_proxy() {
+  setup_config
+
+  target=fess
+  for opt in "$@" ; do
+    case $opt in
+      -n | --name)
+        eck_name=$2
+        shift 2
+        ;;
+      -t | --target)
+        target=$2
+        shift 2
+        ;;
+      *)
+        if [[ -n "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+          shift 1
+        fi
+        ;;
+    esac
+  done
+
+  if [[ ${target} = "elasticsearch" ]] ; then
+    kubectl port-forward service/${eck_name}-es-http 9200
+  elif [[ ${target} = "fess" ]] ; then
+    kubectl port-forward service/${eck_name}-http 8080
+  else
+    echo "Unknown target: ${target}"
+    exit 1
+  fi
+
+}
+
+run_curl() {
+  setup_config
+
+  check_command curl
+
+  args=$@
+
+  if [[ x${elastic_passwd} = "x" ]] ; then
+    elastic_passwd=$(kubectl get secret "${eck_name}-es-elastic-user" -o go-template='{{.data.elastic | base64decode}}')
+    echo "export elastic_passwd=${elastic_passwd}" >> "${eckctl_config_file}"
+  fi
+  
+  curl -u "elastic:${elastic_passwd}" -k $args
+}
+
+cmd=$1
+case ${cmd} in
+  create)
+    shift
+    create_eck $@
+    ;;
+  delete)
+    shift
+    delete_eck $@
+    ;;
+  proxy)
+    shift
+    run_proxy $@
+    ;;
+  curl)
+    shift
+    run_curl $@
+    ;;
+  *)
+    usage
+    ;;
+esac
+

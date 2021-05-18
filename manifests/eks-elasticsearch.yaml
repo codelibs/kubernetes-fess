@@ -1,0 +1,109 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: __CLUSTER_NAME__
+spec:
+  version: __ES_VERSION__
+#  http:
+#    tls:
+#      selfSignedCertificate:
+#        disabled: true
+  nodeSets:
+  - name: master
+    count: __ES_MASTER_COUNT__
+    config:
+      node.store.allow_mmap: false
+      node.roles: ["master"]
+#      xpack.security.enabled: false
+    podTemplate:
+      spec:
+#        initContainers:
+#        - name: install-plugins
+#          command:
+#          - sh
+#          - -c
+#          - |
+#            bin/elasticsearch-plugin install --batch analysis-kuromoji;
+#            bin/elasticsearch-plugin install --batch analysis-nori;
+#            bin/elasticsearch-plugin install --batch analysis-smartcn;
+        containers:
+        - name: elasticsearch
+          env:
+          - name: ES_JAVA_OPTS
+            value: -Xms1g -Xmx1g
+          resources:
+            limits:
+              memory: 1.5Gi
+            requests:
+              memory: 1Gi
+        tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "es-master"
+          effect: "NoSchedule"
+  - name: data
+    count: __ES_DATA_COUNT__
+    config:
+      node.store.allow_mmap: false
+      node.roles: ["data", "ingest", "ml", "transform"]
+#      xpack.security.enabled: false
+    podTemplate:
+      spec:
+#        initContainers:
+#        - name: install-plugins
+#          command:
+#          - sh
+#          - -c
+#          - |
+#            bin/elasticsearch-plugin install --batch analysis-kuromoji;
+#            bin/elasticsearch-plugin install --batch analysis-nori;
+#            bin/elasticsearch-plugin install --batch analysis-smartcn;
+        containers:
+        - name: elasticsearch
+          env:
+          - name: ES_JAVA_OPTS
+            value: -Xms1g -Xmx1g
+          resources:
+            limits:
+              memory: 1.5Gi
+            requests:
+              memory: 1Gi
+        tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "es-data"
+          effect: "NoSchedule"
+  - name: client
+    count: __ES_CLIENT_COUNT__
+    config:
+      node.store.allow_mmap: false
+      node.roles: !!seq ""
+#      xpack.security.enabled: false
+    podTemplate:
+      spec:
+#        initContainers:
+#        - name: install-plugins
+#          command:
+#          - sh
+#          - -c
+#          - |
+#            bin/elasticsearch-plugin install --batch analysis-kuromoji;
+#            bin/elasticsearch-plugin install --batch analysis-nori;
+#            bin/elasticsearch-plugin install --batch analysis-smartcn;
+        containers:
+        - name: elasticsearch
+          env:
+          - name: ES_JAVA_OPTS
+            value: -Xms1g -Xmx1g
+          resources:
+            limits:
+              memory: 1.5Gi
+            requests:
+              memory: 1Gi
+        tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "es-client"
+          effect: "NoSchedule"
+
+

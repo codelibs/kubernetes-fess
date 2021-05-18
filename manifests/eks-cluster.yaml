@@ -1,0 +1,45 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: __CLUSTER_NAME__
+  region: us-west-2
+
+nodeGroups:
+  - name: operator
+    instanceType: t3a.small
+    desiredCapacity: __DEFAULT_COUNT__
+    volumeSize: 20
+    ssh:
+      enableSsm: true
+  - name: es-master
+    instanceType: a1.medium
+    desiredCapacity: __ES_MASTER_COUNT__
+    volumeSize: 20
+    ssh:
+      enableSsm: true
+    taints:
+      dedicated: "es-master:NoSchedule"
+    tags:
+      k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-master:NoSchedule"
+  - name: es-data
+    instanceType: a1.large
+    desiredCapacity: __ES_DATA_COUNT__
+    volumeSize: 20
+    ssh:
+      enableSsm: true
+    taints:
+      dedicated: "es-data:NoSchedule"
+    tags:
+      k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-data:NoSchedule"
+  - name: es-client
+    instanceType: a1.medium
+    desiredCapacity: __ES_CLIENT_COUNT__
+    volumeSize: 20
+    ssh:
+      enableSsm: true
+    taints:
+      dedicated: "es-client:NoSchedule"
+    tags:
+      k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-client:NoSchedule"
+
