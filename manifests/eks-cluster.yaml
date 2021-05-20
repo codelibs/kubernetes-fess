@@ -9,13 +9,13 @@ nodeGroups:
   - name: operator
     instanceType: t3a.small
     desiredCapacity: __DEFAULT_COUNT__
-    volumeSize: 20
+    volumeSize: 10
     ssh:
       enableSsm: true
   - name: es-master
     instanceType: a1.medium
     desiredCapacity: __ES_MASTER_COUNT__
-    volumeSize: 20
+    volumeSize: 10
     ssh:
       enableSsm: true
     taints:
@@ -23,9 +23,9 @@ nodeGroups:
     tags:
       k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-master:NoSchedule"
   - name: es-data
-    instanceType: a1.large
+    instanceType: m6g.medium
     desiredCapacity: __ES_DATA_COUNT__
-    volumeSize: 20
+    volumeSize: 10
     ssh:
       enableSsm: true
     taints:
@@ -35,11 +35,21 @@ nodeGroups:
   - name: es-client
     instanceType: a1.medium
     desiredCapacity: __ES_CLIENT_COUNT__
-    volumeSize: 20
+    volumeSize: 10
     ssh:
       enableSsm: true
     taints:
       dedicated: "es-client:NoSchedule"
     tags:
       k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-client:NoSchedule"
+  - name: fess
+    instanceType: a1.medium
+    desiredCapacity: __FESS_COUNT__
+    volumeSize: 10
+    ssh:
+      enableSsm: true
+    taints:
+      dedicated: "fess:NoSchedule"
+    tags:
+      k8s.io/cluster-autoscaler/node-template/taint/dedicated: "fess:NoSchedule"
 

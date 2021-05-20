@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fess-server
+  labels:
+    app: fess
+spec:
+  replicas: __FESS_COUNT__
+  selector:
+    matchLabels:
+      app: fess
+  template:
+    metadata:
+      labels:
+        app: fess
+    spec:
+      containers:
+        - name: fess
+          image: ghcr.io/codelibs/fess:__FESS_VERSION__
+          ports:
+            - containerPort: 8080
+          env:
+#            - name: FESS_LOG_LEVEL
+#              value: debug
+            - name: ES_TYPE
+              value: cloud
+            - name: ES_HTTP_URL
+              value: http://__CLUSTER_NAME__-es-http:9200
+            - name: FESS_DICTIONARY_PATH
+              value: /usr/share/elasticsearch/config/dictionary/
+            - name: ES_USERNAME
+              value: elastic
+            - name: ES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: __CLUSTER_NAME__-es-elastic-user
+                  key: elastic
+      restartPolicy: Always
+      tolerations:
+        - key: "dedicated"
+          operator: "Equal"
+          value: "fess"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: __CLUSTER_NAME__-http
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: fess
+

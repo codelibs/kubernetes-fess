@@ -13,16 +13,35 @@ $ ./fessctl create -k kind
 
 -k option is kubernetes type. You can spcify `kind` or `eks`.
 
-### Use Proxy
+### Proxy Access
+
+#### Elasticsearch
+
+Run a proxy as below:
+
+```
+$ ./fessctl proxy -t elasticsearch
+```
+
+and then
+
+```
+$ ./fessctl curl https://localhost:9200
+```
+
+
+#### Fess
+
+Run a proxy as below:
 
 ```
 $ ./fessctl proxy
 ```
 
-### Use CUrl
+and then
 
 ```
-$ ./fessctl curl https://localhost:9200
+$ curl https://localhost:8080
 ```
 
 ### Delete Fess on Kubernetes

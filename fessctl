@@ -12,12 +12,12 @@ eckctl_config_file=${config_dir}/eckctl_config
 eck_name=fess
 k8s_type=kind
 eck_url=https://download.elastic.co/downloads/eck/1.5.0/all-in-one.yaml
-wait_time=600
+wait_time=900
 default_pool_size=1
 es_version=7.12.1
 fess_version=snapshot
-es_master_pool_size=3
-es_data_pool_size=2
+es_master_pool_size=1
+es_data_pool_size=1
 es_client_pool_size=1
 fess_pool_size=1
 
