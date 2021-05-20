@@ -23,7 +23,7 @@ nodeGroups:
     tags:
       k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-master:NoSchedule"
   - name: es-data
-    instanceType: m6g.medium
+    instanceType: a1.large
     desiredCapacity: __ES_DATA_COUNT__
     volumeSize: 10
     ssh:
@@ -43,7 +43,7 @@ nodeGroups:
     tags:
       k8s.io/cluster-autoscaler/node-template/taint/dedicated: "es-client:NoSchedule"
   - name: fess
-    instanceType: a1.medium
+    instanceType: a1.large
     desiredCapacity: __FESS_COUNT__
     volumeSize: 10
     ssh:
